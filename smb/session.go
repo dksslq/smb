@@ -12,6 +12,7 @@ import (
 	"log"
 	"net"
 	"runtime/debug"
+	"time"
 
 	"github.com/stacktitan/smb/gss"
 	"github.com/stacktitan/smb/ntlmssp"
@@ -39,6 +40,7 @@ type Options struct {
 	User        string
 	Password    string
 	Hash        string
+	Timeout		time.Duration
 }
 
 func validateOptions(opt Options) error {
@@ -51,16 +53,41 @@ func validateOptions(opt Options) error {
 	return nil
 }
 
+// Conn wraps a net.Conn, and sets a deadline for every read
+// and write operation.
+type Conn struct {
+        net.Conn
+        ReadTimeout  time.Duration
+        WriteTimeout time.Duration
+}
+
+func (c *Conn) Read(b []byte) (int, error) {
+        err := c.Conn.SetReadDeadline(time.Now().Add(c.ReadTimeout))
+        if err != nil {
+                return 0, err
+        }
+        return c.Conn.Read(b)
+}
+
+func (c *Conn) Write(b []byte) (int, error) {
+        err := c.Conn.SetWriteDeadline(time.Now().Add(c.WriteTimeout))
+        if err != nil {
+                return 0, err
+        }
+        return c.Conn.Write(b)
+}
+
 func NewSession(opt Options, debug bool) (s *Session, err error) {
 
 	if err := validateOptions(opt); err != nil {
 		return nil, err
 	}
 
-	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", opt.Host, opt.Port))
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", opt.Host, opt.Port), opt.Timeout)
 	if err != nil {
 		return
 	}
+	conn = &Conn{conn, opt.Timeout, opt.Timeout}
 
 	s = &Session{
 		IsSigningRequired: false,
